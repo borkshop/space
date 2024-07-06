@@ -41,7 +41,7 @@ const drawLine = (plotter, source, target, C, R, Z, T) => {
   }
 };
 
-const drawCircle = (center, radius, C, R, Z, T) => {
+const drawCircle = (plotter, center, radius, C, R, Z, T) => {
   const angles = [
     0,
     Math.PI / 2,
@@ -69,15 +69,42 @@ const drawCircle = (center, radius, C, R, Z, T) => {
   }
 };
 
-const drawVessel = (plotter, center, direction, radius, C, R, Z, T) => {
+const drawAbstractVessel = (plotter, center, direction, radius, C, R, Z, T) => {
   const top = ray2(center, direction, radius);
-  const port = ray2(center, direction + Math.PI * 4 / 5, radius);
-  const stbd = ray2(center, direction + Math.PI * 6 / 5, radius);
+  const bottom = ray2(center, direction + TAU/2, radius);
+  const projectedTop = project(top, C, R, Z);
+  const projectedBottom = project(bottom, C, R, Z);
+  if (distance2(projectedTop, projectedBottom) >= T) {
+    return { top };
+  }
+  const angle = Math.atan2(projectedTop.y - projectedBottom.y, projectedTop.x - projectedBottom.x);
+  const projectedCenter = project(center, C, R, Z);
+  const t = ray2(projectedCenter, angle, T/2);
+  const b = ray2(projectedCenter, angle+TAU/2, T/2);
+  const p = ray2(b, angle+TAU/4, T/2);
+  const s = ray2(b, angle-TAU/4, T/2);
+  plotter.beginPath();
+  plotter.moveTo(t.x, t.y);
+  plotter.lineTo(b.x, b.y);
+  plotter.stroke();
+  plotter.moveTo(p.x, p.y);
+  plotter.lineTo(s.x, s.y);
+  plotter.stroke();
+  return null;
+};
+
+const drawVessel = (plotter, center, direction, radius, C, R, Z, T) => {
+  const concrete = drawAbstractVessel(plotter, center, direction, radius, C, R, Z, T);
+  if (concrete === null) {
+    return;
+  }
+  const { top } = concrete;
+  const port = ray2(center, direction + TAU * 2/5, radius);
+  const stbd = ray2(center, direction + TAU * 3/5, radius);
   drawLine(plotter, top, port, C, R, Z, T);
   drawLine(plotter, top, stbd, C, R, Z, T);
   drawLine(plotter, port, stbd, C, R, Z, T);
 };
-
 
 const drawSurface = (plotter, center, orientation, radius, C, R, Z, T, numerator = 0, divisions = 0, startDepthPoint = undefined) => {
   const denominator = 1 << divisions;
@@ -99,7 +126,7 @@ const drawSurface = (plotter, center, orientation, radius, C, R, Z, T, numerator
   }
 };
 
-const drawSurface2 = (
+const drawSurface2Detail = (
   plotter,
   origin,
   orientation,
@@ -121,7 +148,7 @@ const drawSurface2 = (
   const projectedLevelSurfacePoint = project(levelSurfacePoint, C, R, Z);
   if (divisions <= 3 || distance2(projectedStartSurfacePoint, projectedLevelSurfacePoint) > T) { 
     const center = radius(numerator * 2 + 1, denominator * 2, start.entropy, stop.entropy, divisions);
-    drawSurface2(
+    drawSurface2Detail(
       plotter,
       origin,
       orientation,
@@ -137,7 +164,7 @@ const drawSurface2 = (
       startDepthPoint,
       center,
     );
-    drawSurface2(
+    drawSurface2Detail(
       plotter,
       origin,
       orientation,
@@ -157,6 +184,30 @@ const drawSurface2 = (
   } else {
     drawLine(plotter, startDepthPoint, startSurfacePoint, C, R, Z, T);
     drawLine(plotter, startSurfacePoint, stopSurfacePoint, C, R, Z, T);
+  }
+};
+
+const drawAbstractSurface = (plotter, center, orientation, radius, C, R, Z, T) => {
+  const angle = Math.atan2(center.x, center.y);
+  const widdershins = ray2(center, angle, radius);
+  const projectedCenter = project(center, C, R, Z);
+  const projectedWiddershins = project(widdershins, C, R, Z);
+  const spread = distance2(projectedCenter, projectedWiddershins);
+  if (spread > T*2) {
+    return true;
+  }
+  plotter.beginPath();
+  plotter.moveTo(projectedCenter.x, projectedCenter.y);
+  plotter.arc(projectedCenter.x, projectedCenter.y, T, orientation, orientation+TAU, false);
+  plotter.stroke();
+  return false;
+};
+
+const drawSurface2 = (plotter, origin, orientation, radius, C, R, Z, T) => {
+  const r = radius(0, 1, 0, 0, 0).radius;
+  const concrete = drawAbstractSurface(plotter, origin, orientation, r, C, R, Z, T);
+  if (concrete) {
+    drawSurface2Detail(plotter, origin, orientation, radius, C, R, Z, T);
   }
 };
 
