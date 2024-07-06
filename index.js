@@ -1,138 +1,23 @@
 
 import * as m2d from './matrix2d.js';
+import { lerp1 } from './geometry1d.js';
+import { lerp2, distance2, ray2, scale2 } from './geometry2d.js';
+import { add2a, scale2a } from './geometry2a.js';
+import { churn, fold, random } from './xorshift128.js';
 
 const TAU = Math.PI * 2;
 
 const seed = [0xb0b5c0ff, 0xeefacade, Math.random() * 0xffffff, Math.random() * 0xffffff];
 
-const churn = state => {
-  // uint64_t s1 = s[0]
-  let s1U = state[0];
-  let s1L = state[1];
-  // uint64_t s0 = s[1]
-  const s0U = state[2];
-  const s0L = state[3];
-
-  // result = s0 + s1
-  const sumL = (s0L >>> 0) + (s1L >>> 0);
-  const high = (s0U + s1U + ((sumL / 2) >>> 31)) >>> 0;
-  const low = sumL >>> 0;
-
-  // s[0] = s0
-  state[0] = s0U;
-  state[1] = s0L;
-
-  // - t1 = [0, 0]
-  let t1U = 0;
-  let t1L = 0;
-  // - t2 = [0, 0]
-  let t2U = 0;
-  let t2L = 0;
-
-  // s1 ^= s1 << 23;
-  // :: t1 = s1 << 23
-  const a1 = 23;
-  const m1 = 0xffffffff << (32 - a1);
-  t1U = (s1U << a1) | ((s1L & m1) >>> (32 - a1));
-  t1L = s1L << a1;
-  // :: s1 = s1 ^ t1
-  s1U ^= t1U;
-  s1L ^= t1L;
-
-  // t1 = ( s1 ^ s0 ^ ( s1 >> 17 ) ^ ( s0 >> 26 ) )
-  // :: t1 = s1 ^ s0
-  t1U = s1U ^ s0U;
-  t1L = s1L ^ s0L;
-  // :: t2 = s1 >> 18
-  const a2 = 18;
-  const m2 = 0xffffffff >>> (32 - a2);
-  t2U = s1U >>> a2;
-  t2L = (s1L >>> a2) | ((s1U & m2) << (32 - a2));
-  // :: t1 = t1 ^ t2
-  t1U ^= t2U;
-  t1L ^= t2L;
-  // :: t2 = s0 >> 5
-  const a3 = 5;
-  const m3 = 0xffffffff >>> (32 - a3);
-  t2U = s0U >>> a3;
-  t2L = (s0L >>> a3) | ((s0U & m3) << (32 - a3));
-  // :: t1 = t1 ^ t2
-  t1U ^= t2U;
-  t1L ^= t2L;
-
-  // s[1] = t1
-  state[2] = t1U;
-  state[3] = t1L;
-
-  return { high, low };
-};
-
-const fold = (state, words) => {
-  let j = 0;
-  for (let i = 0; i < words.length; i += 1) {
-    state[j] ^= words[i];
-    j = (j + 1) & (4 - 1);
-  }
-};
-
-const random = state => {
-  const { high, low } = churn(state);
-  // Math.pow(2, -32) = 2.3283064365386963e-10
-  // Math.pow(2, -52) = 2.220446049250313e-16
-  return high * 2.3283064365386963e-10 + (low >>> 12) * 2.220446049250313e-16;
-};
-
 const $plotter = document.querySelector('#plotter');
 $plotter.width = window.innerWidth;
 $plotter.height = window.innerHeight;
-
-const add2 = ({x: x1, y: y1}, {x: x2, y: y2}) => ({
-  x: x1 + x2,
-  y: y1 + y2,
-});
-
-const add2a = ({x: x1, y: y1, a: a1}, {x: x2, y: y2, a: a2}) => ({
-  x: x1 + x2,
-  y: y1 + y2,
-  a: a1 + a2,
-});
-
-const sub2 = ({x: x1, y: y1}, {x: x2, y: y2}) => ({
-  x: x1 - x2,
-  y: y1 - y2,
-});
-
-const scale2 = ({x, y}, scale) => ({
-  x: x * scale,
-  y: y * scale,
-});
-
-const scale2a = ({x, y, a}, scale) => ({
-  x: x * scale,
-  y: y * scale,
-  a: a * scale,
-});
-
-const ray = ({x, y}, angle, distance) => ({
-  x: x + Math.cos(angle) * distance,
-  y: y + Math.sin(angle) * distance,
-});
-
-const distance2 = ({x: x1, y: y1}, {x: x2, y: y2}) => {
-  return Math.hypot(x1 - x2, y1 - y2);
-};
-
-const lerp1 = (a, b, p) => a * p + b * (1 - p);
-
-const lerp2 = ({x: x1, y: y1}, {x: x2, y: y2}, p) => {
-  return {x: lerp1(x1, x2, p), y: lerp1(y1, y2, p)};
-};
 
 const project = ({x, y}, C, R, Z) => {
   const angle = Math.atan2(y, x);
   const hypot = Math.hypot(x, y);
   const radius = Math.atan2(hypot, Z) / Math.PI * 2 * R;
-  return ray(C, angle, radius);
+  return ray2(C, angle, radius);
 };
 
 const drawLine = (plotter, source, target, C, R, Z, T) => {
@@ -167,8 +52,8 @@ const drawCircle = (center, radius, C, R, Z, T) => {
   while (angles.length >= 2) {
     const cd = angles.pop();
     const ad = angles.at(-1);
-    const a = ray(center, ad, radius);
-    const c = ray(center, cd, radius);
+    const a = ray2(center, ad, radius);
+    const c = ray2(center, cd, radius);
     const ap = project(a, C, R, Z);
     const cp = project(c, C, R, Z);
     if (distance2(ap, cp) > T) {
@@ -185,9 +70,9 @@ const drawCircle = (center, radius, C, R, Z, T) => {
 };
 
 const drawVessel = (plotter, center, direction, radius, C, R, Z, T) => {
-  const top = ray(center, direction, radius);
-  const port = ray(center, direction + Math.PI * 4 / 5, radius);
-  const stbd = ray(center, direction + Math.PI * 6 / 5, radius);
+  const top = ray2(center, direction, radius);
+  const port = ray2(center, direction + Math.PI * 4 / 5, radius);
+  const stbd = ray2(center, direction + Math.PI * 6 / 5, radius);
   drawLine(plotter, top, port, C, R, Z, T);
   drawLine(plotter, top, stbd, C, R, Z, T);
   drawLine(plotter, port, stbd, C, R, Z, T);
@@ -198,10 +83,10 @@ const drawSurface = (plotter, center, orientation, radius, C, R, Z, T, numerator
   const denominator = 1 << divisions;
   const startRadius = radius(numerator / denominator);
   const stopRadius = radius(((numerator + 1) % denominator) / denominator);
-  const startSurfacePoint = ray(center, orientation + (numerator / denominator) * TAU, startRadius);
-  startDepthPoint = startDepthPoint ?? ray(center, orientation + (numerator / denominator) * TAU, startRadius * (1 - 1 / denominator));
-  const stopSurfacePoint = ray(center, orientation + ((numerator + 1) / denominator) * TAU, stopRadius);
-  const levelSurfacePoint = ray(center, orientation + ((numerator + 1) / denominator) * TAU, startRadius);
+  const startSurfacePoint = ray2(center, orientation + (numerator / denominator) * TAU, startRadius);
+  startDepthPoint = startDepthPoint ?? ray2(center, orientation + (numerator / denominator) * TAU, startRadius * (1 - 1 / denominator));
+  const stopSurfacePoint = ray2(center, orientation + ((numerator + 1) / denominator) * TAU, stopRadius);
+  const levelSurfacePoint = ray2(center, orientation + ((numerator + 1) / denominator) * TAU, startRadius);
 
   const projectedStartSurfacePoint = project(startSurfacePoint, C, R, Z);
   const projectedLevelSurfacePoint = project(levelSurfacePoint, C, R, Z);
@@ -226,12 +111,12 @@ const drawSurface2 = (
   divisions = 0,
   denominator = (1 << divisions),
   start = radius(numerator, denominator, before, after, divisions),
-  startSurfacePoint = ray(origin, orientation + (numerator / denominator) * TAU, start.radius),
-  startDepthPoint = ray(origin, orientation + (numerator / denominator) * TAU, start.radius * (1 - 1 / denominator)),
+  startSurfacePoint = ray2(origin, orientation + (numerator / denominator) * TAU, start.radius),
+  startDepthPoint = ray2(origin, orientation + (numerator / denominator) * TAU, start.radius * (1 - 1 / denominator)),
   stop = radius(((numerator + 1) % denominator), denominator, before, after, divisions),
-  stopSurfacePoint = ray(origin, orientation + ((numerator + 1) / denominator) * TAU, stop.radius),
+  stopSurfacePoint = ray2(origin, orientation + ((numerator + 1) / denominator) * TAU, stop.radius),
 ) => {
-  const levelSurfacePoint = ray(origin, orientation + ((numerator + 1) / denominator) * TAU, start.radius);
+  const levelSurfacePoint = ray2(origin, orientation + ((numerator + 1) / denominator) * TAU, start.radius);
   const projectedStartSurfacePoint = project(startSurfacePoint, C, R, Z);
   const projectedLevelSurfacePoint = project(levelSurfacePoint, C, R, Z);
   if (divisions <= 3 || distance2(projectedStartSurfacePoint, projectedLevelSurfacePoint) > T) { 
