@@ -25,6 +25,19 @@ export const distance2 = ({x: x1, y: y1}, {x: x2, y: y2}) => {
   return Math.hypot(x1 - x2, y1 - y2);
 };
 
+export const dot2 = ({x: x1, y: y1}, {x: x2, y: y2}) => {
+  return x1 * x2 + y1 * y2;
+};
+
+export const perp2 = ({x, y }) => ({
+  x: y,
+  y: -x,
+});
+
+export const direction2 = ({x: x1, y: y1}, {x: x2, y: y2}) => {
+  return Math.atan2(y2 - y1, x2 - x1);
+};
+
 export const lerp2 = ({x: x1, y: y1}, {x: x2, y: y2}, p) => {
   return {x: lerp1(x1, x2, p), y: lerp1(y1, y2, p)};
 };

@@ -1,7 +1,6 @@
 
 import * as m2d from './matrix2d.js';
-import { lerp1 } from './geometry1d.js';
-import { lerp2, distance2, ray2, scale2 } from './geometry2d.js';
+import { sub2, dot2, perp2, lerp2, distance2, direction2, ray2, scale2 } from './geometry2d.js';
 import { add2a, scale2a } from './geometry2a.js';
 import { churn, fold, random } from './xorshift128.js';
 
@@ -9,14 +8,10 @@ const TAU = Math.PI * 2;
 
 const seed = [0xb0b5c0ff, 0xeefacade, Math.random() * 0xffffff, Math.random() * 0xffffff];
 
-const $plotter = document.querySelector('#plotter');
-$plotter.width = window.innerWidth;
-$plotter.height = window.innerHeight;
-
 const project = ({x, y}, C, R, Z) => {
   const angle = Math.atan2(y, x);
   const hypot = Math.hypot(x, y);
-  const radius = Math.atan2(hypot, Z) / Math.PI * 2 * R;
+  const radius = Math.atan2(hypot, Z) / TAU * 4 * R;
   return ray2(C, angle, radius);
 };
 
@@ -32,34 +27,6 @@ const drawLine = (plotter, source, target, C, R, Z, T) => {
       const b = lerp2(a, c, 0.5);
       points.push(b);
       points.push(c);
-    } else {
-      plotter.beginPath();
-      plotter.moveTo(ap.x, ap.y);
-      plotter.lineTo(cp.x, cp.y);
-      plotter.stroke();
-    }
-  }
-};
-
-const drawCircle = (plotter, center, radius, C, R, Z, T) => {
-  const angles = [
-    0,
-    Math.PI / 2,
-    Math.PI,
-    Math.PI * 3 / 2,
-    Math.PI * 2
-  ];
-  while (angles.length >= 2) {
-    const cd = angles.pop();
-    const ad = angles.at(-1);
-    const a = ray2(center, ad, radius);
-    const c = ray2(center, cd, radius);
-    const ap = project(a, C, R, Z);
-    const cp = project(c, C, R, Z);
-    if (distance2(ap, cp) > T) {
-      const bd = lerp1(ad, cd, 0.5);
-      angles.push(bd);
-      angles.push(cd);
     } else {
       plotter.beginPath();
       plotter.moveTo(ap.x, ap.y);
@@ -106,53 +73,33 @@ const drawVessel = (plotter, center, direction, radius, C, R, Z, T) => {
   drawLine(plotter, port, stbd, C, R, Z, T);
 };
 
-const drawSurface = (plotter, center, orientation, radius, C, R, Z, T, numerator = 0, divisions = 0, startDepthPoint = undefined) => {
-  const denominator = 1 << divisions;
-  const startRadius = radius(numerator / denominator);
-  const stopRadius = radius(((numerator + 1) % denominator) / denominator);
-  const startSurfacePoint = ray2(center, orientation + (numerator / denominator) * TAU, startRadius);
-  startDepthPoint = startDepthPoint ?? ray2(center, orientation + (numerator / denominator) * TAU, startRadius * (1 - 1 / denominator));
-  const stopSurfacePoint = ray2(center, orientation + ((numerator + 1) / denominator) * TAU, stopRadius);
-  const levelSurfacePoint = ray2(center, orientation + ((numerator + 1) / denominator) * TAU, startRadius);
-
-  const projectedStartSurfacePoint = project(startSurfacePoint, C, R, Z);
-  const projectedLevelSurfacePoint = project(levelSurfacePoint, C, R, Z);
-  if (divisions <= 3 || distance2(projectedStartSurfacePoint, projectedLevelSurfacePoint) > T) { 
-    drawSurface(plotter, center, orientation, radius, C, R, Z, T, numerator * 2, divisions + 1, startDepthPoint);
-    drawSurface(plotter, center, orientation, radius, C, R, Z, T, numerator * 2 + 1, divisions + 1);
-  } else {
-    drawLine(plotter, startDepthPoint, startSurfacePoint, C, R, Z, T);
-    drawLine(plotter, startSurfacePoint, stopSurfacePoint, C, R, Z, T);
-  }
-};
-
-const drawSurface2Detail = (
+const drawSurfaceDetail = (
   plotter,
   origin,
   orientation,
-  radius,
+  describeSurface,
   C, R, Z, T,
   before = 0,
   after = 0,
   numerator = 0,
   divisions = 0,
   denominator = (1 << divisions),
-  start = radius(numerator, denominator, before, after, divisions),
+  start = describeSurface(numerator, denominator, before, after, divisions),
   startSurfacePoint = ray2(origin, orientation + (numerator / denominator) * TAU, start.radius),
   startDepthPoint = ray2(origin, orientation + (numerator / denominator) * TAU, start.radius * (1 - 1 / denominator)),
-  stop = radius(((numerator + 1) % denominator), denominator, before, after, divisions),
+  stop = describeSurface(((numerator + 1) % denominator), denominator, before, after, divisions),
   stopSurfacePoint = ray2(origin, orientation + ((numerator + 1) / denominator) * TAU, stop.radius),
 ) => {
   const levelSurfacePoint = ray2(origin, orientation + ((numerator + 1) / denominator) * TAU, start.radius);
   const projectedStartSurfacePoint = project(startSurfacePoint, C, R, Z);
   const projectedLevelSurfacePoint = project(levelSurfacePoint, C, R, Z);
   if (divisions <= 3 || distance2(projectedStartSurfacePoint, projectedLevelSurfacePoint) > T) { 
-    const center = radius(numerator * 2 + 1, denominator * 2, start.entropy, stop.entropy, divisions);
-    drawSurface2Detail(
+    const center = describeSurface(numerator * 2 + 1, denominator * 2, start.entropy, stop.entropy, divisions);
+    drawSurfaceDetail(
       plotter,
       origin,
       orientation,
-      radius,
+      describeSurface,
       C, R, Z, T,
       before,
       center.entropy,
@@ -164,11 +111,11 @@ const drawSurface2Detail = (
       startDepthPoint,
       center,
     );
-    drawSurface2Detail(
+    drawSurfaceDetail(
       plotter,
       origin,
       orientation,
-      radius,
+      describeSurface,
       C, R, Z, T,
       center.entropy,
       after,
@@ -187,9 +134,9 @@ const drawSurface2Detail = (
   }
 };
 
-const drawAbstractSurface = (plotter, center, orientation, radius, C, R, Z, T) => {
+const drawAbstractSurface = (plotter, center, orientation, describeSurface, C, R, Z, T) => {
   const angle = Math.atan2(center.x, center.y);
-  const widdershins = ray2(center, angle, radius);
+  const widdershins = ray2(center, angle, describeSurface);
   const projectedCenter = project(center, C, R, Z);
   const projectedWiddershins = project(widdershins, C, R, Z);
   const spread = distance2(projectedCenter, projectedWiddershins);
@@ -203,29 +150,16 @@ const drawAbstractSurface = (plotter, center, orientation, radius, C, R, Z, T) =
   return false;
 };
 
-const drawSurface2 = (plotter, origin, orientation, radius, C, R, Z, T) => {
-  const r = radius(0, 1, 0, 0, 0).radius;
+const drawSurface = (plotter, origin, orientation, describeSurface, C, R, Z, T) => {
+  const r = describeSurface(0, 1, 0, 0, 0).radius;
   const concrete = drawAbstractSurface(plotter, origin, orientation, r, C, R, Z, T);
   if (concrete) {
-    drawSurface2Detail(plotter, origin, orientation, radius, C, R, Z, T);
+    drawSurfaceDetail(plotter, origin, orientation, describeSurface, C, R, Z, T);
   }
 };
 
-const makeRandomSurface = (min, max) => () => min + Math.random() * (max - min);
-
-const makeSinusoidSurface = (mean, amp, count) => (n, d) => mean + amp * Math.sin(n*TAU*count);
-
-const makeSpikeySurface = (state, min, max) => n => {
-  const r = ~(n * 0xffffffff);
-  state.set(seed);
-  fold(state, [r, r >> 8, r >> 16, r >> 24]);
-  churn(state);
-  churn(state);
-  churn(state);
-  return min + (max - min) * random(state);
-};
-
 const makeAsteroidSurface = (state, min, max) => (n, d, before, after, l) => {
+  // return { entropy: 0, radius: min + (max - min) * n / d };
   const s = ~(n * 0xffffffff / d);
   state.set(seed);
   fold(state, [s, s >> 8, s >> 16, s >> 24]);
@@ -241,7 +175,44 @@ const makeAsteroidSurface = (state, min, max) => (n, d, before, after, l) => {
   return { entropy, radius };
 };
 
+export const radiusAt = (describeSurface, meridian, T) => {
+  let n = 0;
+  let d = 1;
+  let l = 0;
+  let before = 0;
+  let after = 0;
+  let description = describeSurface(n, d, before, after, l);
+  before = description.entropy;
+  after = description.entropy;
+  while (TAU * description.radius / d > T / 2) {
+    n*=2;
+    d*=2;
+    l+=1;
+    description = describeSurface(n+1, d, before, after, l);
+    if (TAU * (n+1) / d > meridian) {
+      after = description.entropy;
+    } else {
+      before = description.entropy;
+      n+=1;
+    }
+  }
+  return description.radius;
+};
+
 const main = () => {
+  const distanceFormat = new Intl.NumberFormat([], {
+    maximumFractionDigits: 0,
+  });
+  const speedFormat = new Intl.NumberFormat([], {
+    maximumFractionDigits: 3,
+  });
+
+  const $plotter = document.querySelector('#plotter');
+  $plotter.width = window.innerWidth;
+  $plotter.height = window.innerHeight;
+
+  const $info = document.querySelector('#info');
+
   const plotter = $plotter.getContext('2d');
 
   const state = new Uint32Array(seed);
@@ -253,7 +224,7 @@ const main = () => {
   // 50% the radius of the projection, or the elevation of an
   // observer over the center that can see to infinity in all
   // directions within a circle of radius 2 Z.
-  const Z = 10;
+  const Z = 100;
 
   // T is the threshold for partitioning a segment, used to
   // reduce level of detail for indistinct features.
@@ -265,7 +236,10 @@ const main = () => {
   // C is the center of the view.
   const C = scale2(viewportSizePx, 0.5);
 
-  const asteroidSurfaceRadius = makeAsteroidSurface(state, 50, 100);
+  const describeAsteroidSurface = makeAsteroidSurface(state, 500, 1000);
+  // const describeAsteroidSurface = (n, d, before, after, l) => {
+  //   return { entropy: 0, radius: 500 + n / d * 500 };
+  // }
   // const spikeySurfaceRadius = makeSpikeySurface(state, 10, 15);
   // const pentasterSurfaceRadius = makeSinusoidSurface(13, 2, 5);
   // const starSurfaceRadius = makeRandomSurface(1000, 1100);
@@ -273,7 +247,7 @@ const main = () => {
   let vesselPosition = {x: 0, y: 0, a: 0};
   let vesselVelocity = {x: 0, y: 0, a: 0};
 
-  let targetPosition = {x: 100, y: 0, a: 0};
+  let targetPosition = {x: 1000, y: 0, a: TAU/2};
   let targetVelocity = {x: 1 / 1000, y: 0, a: 0};
 
   let t = performance.now();
@@ -330,15 +304,15 @@ const main = () => {
     setTimeout(simulate, 100);
 
     const vesselThrust = {
-      x: (keys.w - keys.s) / 1000000,
-      y: (keys.d - keys.a) / 1000000,
+      x: (keys.w - keys.s) / 100000,
+      y: (keys.d - keys.a) / 100000,
     };
     const vesselImpulse = {
       ...m2d.transform(
         vesselThrust,
         m2d.rotate(-vesselPosition.a),
       ),
-      a: (keys.q - keys.e) * TAU / 10000000,
+      a: (keys.q - keys.e) * TAU / 100000000,
     };
 
     vesselVelocity = add2a(vesselVelocity, scale2a(vesselImpulse, dt));
@@ -359,16 +333,39 @@ const main = () => {
     );
 
     plotter.strokeStyle = 'white';
-    drawVessel(plotter, m2d.transform(vesselPosition, viewMatrix), vesselPosition.a - vesselPosition.a - TAU/4, 0.5, C, R, Z, T);
+    drawVessel(plotter, m2d.transform(vesselPosition, viewMatrix), vesselPosition.a - vesselPosition.a - TAU/4, 10, C, R, Z, T);
     // drawVessel(plotter, m2d.transform(targetPosition, viewMatrix), targetPosition.a - vesselPosition.a - TAU/4, 0.5, C, R, Z, T);
-    drawSurface2(plotter, m2d.transform(targetPosition, viewMatrix), vesselPosition.a - targetPosition.a - TAU/4, asteroidSurfaceRadius, C, R, Z, T);
+    drawSurface(plotter, m2d.transform(targetPosition, viewMatrix), vesselPosition.a - targetPosition.a - TAU/4, describeAsteroidSurface, C, R, Z, T);
 
     // drawSurface(plotter, {x: 2000, y: 0}, Math.random() * Math.PI * 2, starSurfaceRadius, C, R, Z, T);
     // drawSurface(plotter, {x: 0, y: 15}, planetRotation, pentasterSurfaceRadius, C, R, Z, T);
     // drawSurface(plotter, {x: 0, y: 0}, 0, spikeySurfaceRadius, C, R, Z, T);
+    //
+    const vesselBearingToTarget = sub2(vesselPosition, targetPosition);
+    const vesselDirectionToTarget = (direction2(targetPosition, vesselPosition) + TAU) % TAU;
+    const vesselDirectionAcrossTarget = perp2(vesselBearingToTarget);
+    const vesselSpeedOnBearingToTarget = dot2(vesselVelocity, vesselBearingToTarget);
+    const vesselSpeedAcrossBearingToTarget = dot2(vesselVelocity, vesselDirectionAcrossTarget);
+    const direction = (direction2(targetPosition, vesselPosition) + TAU) % TAU;
+    const meridian = (direction + targetPosition.a + TAU) % TAU;
+    const elevation = radiusAt(describeAsteroidSurface, meridian, T);
+    const range = distance2(vesselPosition, targetPosition) - elevation - 10;
+    const rangeCircumference = TAU * range;
+    const surfaceCircumference = TAU * elevation;
+    const surfaceRangeSpeed = (vesselSpeedAcrossBearingToTarget / rangeCircumference - targetVelocity.a);
+    const surfaceSpeed = surfaceRangeSpeed / rangeCircumference * surfaceCircumference;
+    $info.innerText = `\
+    range to target: ${distanceFormat.format(range)}m
+    range speed ${vesselSpeedOnBearingToTarget.toFixed(1)}m/s
+    range ortho: ${vesselSpeedAcrossBearingToTarget.toFixed(1)}m/s
+    heading: ${((vesselDirectionToTarget - vesselPosition.a + TAU/2) % TAU / TAU).toFixed(2)}τ
+    spin: ${(-vesselVelocity.a%TAU/TAU*1000).toFixed(4)}τ/s
+    surface position: ${((vesselDirectionToTarget + targetPosition.a + TAU) % TAU / TAU).toFixed(2)}τ
+    surface speed: ${surfaceSpeed.toFixed(1)}m/s
+    `;
   };
 
-  requestAnimationFrame(draw);
+  draw();
   setTimeout(simulate, 100);
 };
 
